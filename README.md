@@ -129,7 +129,7 @@ const repeat = def(
 repeat("foo", { n: 0.5 }); // !TypeError: Property 'n' of the 2nd argument of 'function(string, ?{ n?: number }): string' must be an integer (was 0.5)
 ```
 
-### Overload Signatures
+### Overloaded Signatures
 
 Safunc supports defining functions with overloaded signatures, which is useful when you want to provide multiple ways to call a function with different sets of parameters.
 
