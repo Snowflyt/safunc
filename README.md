@@ -375,7 +375,7 @@ Safunc can also be utilized through CDNs and [import maps](https://developer.moz
     <script type="importmap">
       {
         "imports": {
-          "safunc": "https://cdn.jsdelivr.net/npm/safunc/+esm"
+          "safunc": "https://cdn.jsdelivr.net/npm/safunc@latest/+esm"
         }
       }
     </script>
