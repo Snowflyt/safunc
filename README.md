@@ -4,9 +4,21 @@
 Create <strong><i>runtime-validated</i> functions</strong> with ease, featuring <strong>smart type inference</strong> in TypeScript.
 </p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/safunc">
+    <img src="https://img.shields.io/npm/v/safunc.svg" alt="npm version" height="18">
+  </a>
+  <a href="https://bundlephobia.com/package/safunc">
+    <img src="https://img.shields.io/bundlephobia/minzip/safunc.svg" alt="minzipped size" height="18">
+  </a>
+  <a href="https://github.com/gvergnaud/safunc">
+    <img src="https://img.shields.io/npm/l/safunc.svg" alt="MIT license" height="18">
+  </a>
+</p>
+
 ![screenshot](./screenshot.svg)
 
-Have a try on [TS Playground](https://www.typescriptlang.org/play/?#code/JYWwDg9gTgLgBAbzgEwKYDMA0cDOwDm2MAnmKnAMoFwC+c6UEIcARDgIboCuAdgMYsA3AChhfCDxzwo7HvnIBeFBgAUwuHAD0mjQD0A-OtwEVLYDxip5UFthYKAfLdbnL1gNoBdFgEo47HEoCAB4VKQgwAC44Hi4QACNUKD9HGLjEqC8HTCM8fFNXKyTnMwsimzt9QusHAAYSxxLqpK9ff0CqfGCjDTCYdlho2ISk7HCotJGoMcswfSH0pJSHSYyvI2yjbn4YYAk4GTlUPoGYAHkoChgImYj9GdQwOCUARj8EHq0dDT1DH7hxJJ4FJTs9cNcngooXBeGh0OZUMg4Po4LU4NEQbALlcIiJ-uNkfolJjzpcIXiflBUDAuFAeHAAIJQGTEAB0DCYKiQABtUHIYAALaIAWXYgtZfFQwG5Kj6ETgAFpwac-DopI8-DRsCoAPrYYDLZWwOAAajgwDgACpwRqKVrhD4RMJDvJTOgIBBfCIXccACwAJjs8QGXuEQA).
+Have a try on [StackBlitz](https://stackblitz.com/edit/safunc-minimal-example?file=main.ts&view=editor)!
 
 ## About
 
