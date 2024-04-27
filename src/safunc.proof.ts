@@ -1,6 +1,7 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 
+import { morph } from "arktype";
 import { equal, error, expect, it, test } from "typroof";
 
 import { def, sig } from "./safunc";
@@ -157,6 +158,41 @@ it("should infer signatures with Arktype morph types correctly", () => {
   );
   expect(makeDate).to(
     equal<Safunc<((s: string) => Date) & ((x: string | number, n: number, m: number) => Date)>>,
+  );
+});
+
+it("should support zero-argument functions", () => {
+  const now = def(sig("=>", "Date"), () => new Date());
+  expect(now).to(equal<Safunc<() => Date>>);
+
+  const date = def(
+    sig("=>", "Date"),
+    sig("string", "=>", "Date"),
+    sig("integer>=0", "1<=integer<=12", "1<=integer<=31", "=>", "Date"),
+    (yOrIsoString?, m?, d?) => {
+      if (yOrIsoString === undefined) return new Date();
+      if (typeof yOrIsoString === "string") return new Date(yOrIsoString);
+      return new Date(yOrIsoString, m! - 1, d);
+    },
+  );
+  expect(date).to(
+    equal<
+      Safunc<(() => Date) & ((s: string) => Date) & ((n1: number, n2: number, n3: number) => Date)>
+    >,
+  );
+
+  const isoDateString = morph("Date", (date) => date.toISOString().slice(0, 10));
+
+  const dateString = def(
+    sig("=>", isoDateString),
+    sig("integer>=0", "1<=integer<=12", "1<=integer<=31", "=>", isoDateString),
+    (y?, m?, d?) => {
+      if (y === undefined) return new Date();
+      return new Date(y, m! - 1, d);
+    },
+  );
+  expect(dateString).to(
+    equal<Safunc<(() => string) & ((n1: number, n2: number, n3: number) => string)>>,
   );
 });
 

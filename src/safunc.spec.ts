@@ -1,6 +1,7 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 
+import { morph } from "arktype";
 import { expect, it, test } from "vitest";
 
 import { def, optional, sig } from "./safunc";
@@ -263,6 +264,46 @@ it("should validate function with Arktype morphs", () => {
   );
   expect(makeDate("2024-04-25")).toEqual(new Date("2024-04-25"));
   expect(makeDate("2024", 4, 25)).toEqual(new Date(2024, 3, 25));
+});
+
+it("should support zero-argument functions", () => {
+  const now = def(sig("=>", "Date"), () => new Date());
+  expect(now()).toBeInstanceOf(Date);
+
+  const date = def(
+    sig("=>", "Date"),
+    sig("string", "=>", "Date"),
+    sig("integer>=0", "1<=integer<=12", "1<=integer<=31", "=>", "Date"),
+    (yOrIsoString?, m?, d?) => {
+      if (yOrIsoString === undefined) return new Date();
+      if (typeof yOrIsoString === "string") return new Date(yOrIsoString);
+      return new Date(yOrIsoString, m! - 1, d);
+    },
+  );
+  expect(date()).toBeInstanceOf(Date);
+  expect(date("2024-04-27")).toEqual(new Date("2024-04-27"));
+  expect(date(2024, 4, 27)).toEqual(new Date(2024, 3, 27));
+
+  const isoDateString = morph(
+    "Date",
+    (date) =>
+      date.getFullYear() +
+      "-" +
+      String(date.getMonth() + 1).padStart(2, "0") +
+      "-" +
+      String(date.getDate()).padStart(2, "0"),
+  );
+
+  const dateString = def(
+    sig("=>", isoDateString),
+    sig("integer>=0", "1<=integer<=12", "1<=integer<=31", "=>", isoDateString),
+    (y?, m?, d?) => {
+      if (y === undefined) return new Date();
+      return new Date(y, m! - 1, d);
+    },
+  );
+  expect(typeof dateString()).toBe("string");
+  expect(dateString(2024, 4, 26)).toBe("2024-04-26");
 });
 
 test("Safunc#unwrap", () => {
