@@ -73,12 +73,15 @@ interface Otherwise<Names extends _[]> {
 
 type Conditions = [...[Condition<any, any>, _[], _[]][], Otherwise<any>];
 
-type CountEq<X, TS extends unknown[], Acc extends number = 0> =
+type CountEq<X, TS extends unknown[]> = _CountEq<X, TS> extends infer R extends number ? R : never;
+type _CountEq<X, TS extends unknown[], Acc extends number = 0> =
   TS extends [] ? Acc
-  : CountEq<X, TailPart<TS>, Eq<PartElem<HeadPart<TS>>, X> extends true ? Inc<Acc> : Acc>;
-type CountEqOneOf<XS extends unknown[], TS extends unknown[], Acc extends number = 0> =
+  : _CountEq<X, TailPart<TS>, Eq<PartElem<HeadPart<TS>>, X> extends true ? Inc<Acc> : Acc>;
+type CountEqOneOf<XS extends unknown[], TS extends unknown[]> =
+  _CountEqOneOf<XS, TS> extends infer R extends number ? R : never;
+type _CountEqOneOf<XS extends unknown[], TS extends unknown[], Acc extends number = 0> =
   TS extends [] ? Acc
-  : CountEqOneOf<
+  : _CountEqOneOf<
       XS,
       TailPart<TS>,
       _EqOneOf<PartElem<HeadPart<TS>>, XS> extends true ? Inc<Acc> : Acc
@@ -89,9 +92,11 @@ type _EqOneOf<T, XS extends unknown[]> =
       true
     : _EqOneOf<T, Rest>
   : false;
-type CountExtends<X, TS extends unknown[], Acc extends number = 0> =
+type CountExtends<X, TS extends unknown[]> =
+  _CountExtends<X, TS> extends infer R extends number ? R : never;
+type _CountExtends<X, TS extends unknown[], Acc extends number = 0> =
   TS extends [] ? Acc
-  : CountExtends<X, TailPart<TS>, PartElem<HeadPart<TS>> extends X ? Inc<Acc> : Acc>;
+  : _CountExtends<X, TailPart<TS>, PartElem<HeadPart<TS>> extends X ? Inc<Acc> : Acc>;
 
 type CountOtherwise<TS extends unknown[], CS extends unknown[], Acc extends number = 0> =
   TS extends [] ? Acc

@@ -1,5 +1,6 @@
 import type { CompareStrLength, Reverse, StrToNum } from "./string";
 
+export type Ordering = LT | EQ | GT;
 export type EQ = 0;
 export type GT = 1;
 export type LT = -1;
@@ -74,8 +75,13 @@ type _AddDigit<N extends Digit, M extends Digit> =
  * Compare two natural numbers.
  */
 export type Compare<N extends number, M extends number> =
-  _CompareListLength<_ToChars<N>, _ToChars<M>> extends EQ ? _CompareDigits<_ToChars<N>, _ToChars<M>>
-  : _CompareListLength<_ToChars<N>, _ToChars<M>>;
+  (
+    _CompareListLength<_ToChars<N>, _ToChars<M>> extends EQ ?
+      _CompareDigits<_ToChars<N>, _ToChars<M>>
+    : _CompareListLength<_ToChars<N>, _ToChars<M>>
+  ) extends infer R extends Ordering ?
+    R
+  : never;
 type _CompareListLength<NS extends unknown[], MS extends unknown[]> =
   NS extends [unknown, ...infer ATail extends unknown[]] ?
     MS extends [unknown, ...infer BTail extends unknown[]] ?
