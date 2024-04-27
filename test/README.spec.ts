@@ -186,7 +186,15 @@ test("morph", () => {
   expect(dateString("foo").problems![0]!.message).toBe("Must be a valid date (was 'foo')");
   expect(dateString(42).problems![0]!.message).toBe("Must be a string (was number)");
 
-  const isoDateString = morph("Date", (x) => x.toISOString().slice(0, 10));
+  const isoDateString = morph(
+    "Date",
+    (x) =>
+      x.getFullYear() +
+      "-" +
+      String(x.getMonth() + 1).padStart(2, "0") +
+      "-" +
+      String(x.getDate()).padStart(2, "0"),
+  );
 
   const addYears = def(
     sig(dateString, "integer", "=>", isoDateString),

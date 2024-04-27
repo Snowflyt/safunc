@@ -119,7 +119,15 @@ test("morph", () => {
   const dateString = morph("string", (x, problems) =>
     isNaN(Date.parse(x)) ? problems.mustBe("a valid date") : new Date(x),
   );
-  const isoDateString = morph("Date", (x) => x.toISOString().slice(0, 10));
+  const isoDateString = morph(
+    "Date",
+    (x) =>
+      x.getFullYear() +
+      "-" +
+      String(x.getMonth() + 1).padStart(2, "0") +
+      "-" +
+      String(x.getDate()).padStart(2, "0"),
+  );
 
   const addYears = def(
     //  ^?
