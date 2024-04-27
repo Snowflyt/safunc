@@ -1,10 +1,10 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 
-import { morph } from "arktype";
+import { arrayOf, morph, type } from "arktype";
 import { expect, test } from "vitest";
 
-import { def, optional, sig } from "../src";
+import { def, defAsync, optional, sig } from "../src";
 
 import { trimIndent } from "@/utils/string";
 
@@ -46,6 +46,65 @@ test("introduction", () => {
       "The return value of 'function add(integer, integer): integer' must be an integer (was 3.5)",
     ),
   );
+});
+
+test("asynchronous functions", async () => {
+  type Todo = typeof todo.infer;
+  const todo = type({
+    userId: "integer>0",
+    id: "integer>0",
+    title: "string",
+    completed: "boolean",
+  });
+
+  const getTodos = defAsync(sig("=>", arrayOf(todo)), async () => {
+    //  ^?: Safunc<() => Promise<Todo[]>>
+    const res = await fetch("https://jsonplaceholder.typicode.com/todos");
+    return res.json() as Promise<Todo[]>;
+  });
+  await getTodos(); // => [, ...]
+  expect((await getTodos()).slice(0, 1)).toEqual([
+    { userId: 1, id: 1, title: "delectus aut autem", completed: false },
+  ]);
+
+  type TodoWrong = typeof todoWrong.infer;
+  const todoWrong = type({
+    userId: "integer>0",
+    id: "string>0", // <- This will throw a TypeError
+    title: "string",
+    completed: "boolean",
+  });
+
+  const getTodosWrong = defAsync(sig("=>", arrayOf(todoWrong)), async () => {
+    //  ^?: Safunc<() => Promise<TodoWrong[]>>
+    const res = await fetch("https://jsonplaceholder.typicode.com/todos");
+    return res.json() as Promise<TodoWrong[]>;
+  });
+  await expect(getTodosWrong()).rejects.toThrowError(
+    new TypeError(
+      "Property '0/id' of the return value of 'function(): Promise<Array<{ userId: integer>0; id: string>0; title: string; completed: boolean }>>' must be a string (was number)",
+    ),
+  );
+
+  const getTodo = defAsync(
+    //  ^?: Safunc<(id: number) => Promise<Todo>>
+    sig("integer>0", "=>", todo),
+    async (id) =>
+      await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`).then(
+        (res) => res.json() as Promise<Todo>,
+      ),
+  );
+  expect(() => void getTodo(0.5)).toThrowError(
+    new TypeError(
+      "The 1st argument of 'function(integer>0): Promise<{ userId: integer>0; id: integer>0; title: string; completed: boolean }>' must be an integer (was 0.5)",
+    ),
+  );
+  await expect(getTodo(1)).resolves.toEqual({
+    userId: 1,
+    id: 1,
+    title: "delectus aut autem",
+    completed: false,
+  });
 });
 
 test("optional parameters", () => {

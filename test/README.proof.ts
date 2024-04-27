@@ -1,7 +1,7 @@
-import { morph } from "arktype";
+import { arrayOf, morph, type } from "arktype";
 import { equal, expect, test } from "typroof";
 
-import { def, optional, sig } from "../src";
+import { def, defAsync, optional, sig } from "../src";
 
 import type { Safunc, Sig } from "../src";
 
@@ -26,6 +26,48 @@ test("introduction", () => {
     return n + m + 0.5;
   });
   expect(addIntegers).to(equal<Safunc<(n: number, m: number) => number>>);
+});
+
+test("asynchronous functions", () => {
+  type Todo = typeof todo.infer;
+  const todo = type({
+    userId: "integer>0",
+    id: "integer>0",
+    title: "string",
+    completed: "boolean",
+  });
+
+  const getTodos = defAsync(sig("=>", arrayOf(todo)), async () => {
+    //  ^?
+    const res = await fetch("https://jsonplaceholder.typicode.com/todos");
+    return res.json() as Promise<Todo[]>;
+  });
+  expect(getTodos).to(equal<Safunc<() => Promise<Todo[]>>>);
+
+  type TodoWrong = typeof todoWrong.infer;
+  const todoWrong = type({
+    userId: "integer>0",
+    id: "string>0",
+    title: "string",
+    completed: "boolean",
+  });
+
+  const getTodosWrong = defAsync(sig("=>", arrayOf(todoWrong)), async () => {
+    //  ^?
+    const res = await fetch("https://jsonplaceholder.typicode.com/todos");
+    return res.json() as Promise<TodoWrong[]>;
+  });
+  expect(getTodosWrong).to(equal<Safunc<() => Promise<TodoWrong[]>>>);
+
+  const getTodo = defAsync(
+    //  ^?
+    sig("integer>0", "=>", todo),
+    async (id) =>
+      await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`).then(
+        (res) => res.json() as Promise<Todo>,
+      ),
+  );
+  expect(getTodo).to(equal<Safunc<(id: number) => Promise<Todo>>>);
 });
 
 test("optional parameters", () => {

@@ -1,10 +1,10 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 
-import { morph } from "arktype";
+import { arrayOf, morph, type } from "arktype";
 import { expect, it, test } from "vitest";
 
-import { def, optional, sig } from "./safunc";
+import { def, defAsync, optional, sig } from "./safunc";
 import { trimIndent } from "./utils/string";
 
 it("should validate function arguments", () => {
@@ -304,6 +304,97 @@ it("should support zero-argument functions", () => {
   );
   expect(typeof dateString()).toBe("string");
   expect(dateString(2024, 4, 26)).toBe("2024-04-26");
+});
+
+it("should support asynchronous functions", async () => {
+  type Todo = typeof todo.infer;
+  const todo = type({
+    userId: "integer>0",
+    id: "integer>0",
+    title: "string",
+    completed: "boolean",
+  });
+
+  const getTodos = defAsync(sig("=>", arrayOf(todo)), async () => {
+    const res = await fetch("https://jsonplaceholder.typicode.com/todos");
+    return res.json() as Promise<Todo[]>;
+  });
+  expect((await getTodos()).slice(0, 3)).toEqual([
+    {
+      userId: 1,
+      id: 1,
+      title: "delectus aut autem",
+      completed: false,
+    },
+    {
+      userId: 1,
+      id: 2,
+      title: "quis ut nam facilis et officia qui",
+      completed: false,
+    },
+    {
+      userId: 1,
+      id: 3,
+      title: "fugiat veniam minus",
+      completed: false,
+    },
+  ]);
+
+  type TodoWrong = typeof todoWrong.infer;
+  const todoWrong = type({
+    userId: "integer>0",
+    // Wrong property
+    id: "string>0",
+    title: "string",
+    completed: "boolean",
+  });
+  const getTodosWrong = defAsync(sig("=>", arrayOf(todoWrong)), async () => {
+    const res = await fetch("https://jsonplaceholder.typicode.com/todos");
+    return res.json() as Promise<TodoWrong[]>;
+  });
+  await expect(getTodosWrong()).rejects.toThrowError(
+    new TypeError(
+      "Property '0/id' of the return value of 'function(): Promise<Array<{ userId: integer>0; id: string>0; title: string; completed: boolean }>>' must be a string (was number)",
+    ),
+  );
+
+  const getTodo = defAsync(
+    //  ^?
+    sig("integer>0", "=>", todo),
+    sig("integer>0", "integer>0", "=>", arrayOf(todo)),
+    async (...args) => {
+      // Return a single todo if only one argument is provided
+      if (args.length === 1)
+        return await fetch(`https://jsonplaceholder.typicode.com/todos/${args[0]}`).then(
+          (res) => res.json() as Promise<Todo>,
+        );
+      // Return an array of todos in a range of ids if two arguments are provided
+      const [from, to] = args;
+      return Promise.all(
+        Array.from({ length: to - from + 1 }, (_, i) =>
+          fetch(`https://jsonplaceholder.typicode.com/todos/${from + i}`).then(
+            (res) => res.json() as Promise<Todo>,
+          ),
+        ),
+      );
+    },
+  );
+  expect(() => getTodo(0)).toThrowError(
+    new TypeError(
+      "The 1st argument of 'function(integer>0): Promise<{ userId: integer>0; id: integer>0; title: string; completed: boolean }>' (overload 1 of 2) must be more than 0 (was 0)",
+    ),
+  );
+  expect(() => getTodo(1, 2.5)).toThrowError(
+    new TypeError(
+      "The 2nd argument of 'function(integer>0, integer>0): Promise<Array<{ userId: integer>0; id: integer>0; title: string; completed: boolean }>>' (overload 2 of 2) must be an integer (was 2.5)",
+    ),
+  );
+  await expect(getTodo(1)).resolves.toEqual({
+    userId: 1,
+    id: 1,
+    title: "delectus aut autem",
+    completed: false,
+  });
 });
 
 test("Safunc#unwrap", () => {

@@ -1,10 +1,10 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 
-import { morph } from "arktype";
+import { arrayOf, morph, type } from "arktype";
 import { equal, error, expect, it, test } from "typroof";
 
-import { def, sig } from "./safunc";
+import { def, defAsync, sig } from "./safunc";
 
 import type { Safunc, Sig } from "./safunc";
 
@@ -193,6 +193,48 @@ it("should support zero-argument functions", () => {
   );
   expect(dateString).to(
     equal<Safunc<(() => string) & ((n1: number, n2: number, n3: number) => string)>>,
+  );
+});
+
+it("should support asynchronous functions", () => {
+  type Todo = typeof todo.infer;
+  const todo = type({
+    userId: "integer>0",
+    id: "integer>0",
+    title: "string",
+    completed: "boolean",
+  });
+
+  const getTodos = defAsync(sig("=>", arrayOf(todo)), async () => {
+    //  ^?
+    const res = await fetch("https://jsonplaceholder.typicode.com/todos");
+    return res.json() as Promise<Todo[]>;
+  });
+  expect(getTodos).to(equal<Safunc<() => Promise<Todo[]>>>);
+
+  const getTodo = defAsync(
+    //  ^?
+    sig("integer>0", "=>", todo),
+    sig("integer>0", "integer>0", "=>", arrayOf(todo)),
+    async (...args) => {
+      // Return a single todo if only one argument is provided
+      if (args.length === 1)
+        return await fetch(`https://jsonplaceholder.typicode.com/todos/${args[0]}`).then(
+          (res) => res.json() as Promise<Todo>,
+        );
+      // Return an array of todos in a range of ids if two arguments are provided
+      const [from, to] = args;
+      return Promise.all(
+        Array.from({ length: to - from + 1 }, (_, i) =>
+          fetch(`https://jsonplaceholder.typicode.com/todos/${from + i}`).then(
+            (res) => res.json() as Promise<Todo>,
+          ),
+        ),
+      );
+    },
+  );
+  expect(getTodo).to(
+    equal<Safunc<((n: number) => Promise<Todo>) & ((n: number, m: number) => Promise<Todo[]>)>>,
   );
 });
 

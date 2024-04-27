@@ -92,7 +92,7 @@ export interface SigInOut<out FIn extends Fn, out FOut extends Fn> {
 
   $availableArgumentLengths: readonly number[];
 
-  toString: () => string;
+  toString: (opts?: { wrapReturnTypeWithPromise?: boolean }) => string;
 }
 
 type AsOutAll<TS extends unknown[]> =
@@ -252,7 +252,7 @@ export const sig: SigBuilder = (...args: unknown[]) => {
 
     $availableArgumentLengths,
 
-    toString: () => {
+    toString: ({ wrapReturnTypeWithPromise = false } = {}) => {
       let res = "(";
       res += $parameterSchemas
         .map((s) =>
@@ -260,7 +260,8 @@ export const sig: SigBuilder = (...args: unknown[]) => {
         )
         .join(", ");
       res += ")";
-      if (!isUntyped($returnSchema)) res += `: ${stringifyDefinitionOf($returnSchema)}`;
+      if (!isUntyped($returnSchema))
+        res += `: ${wrapReturnTypeWithPromise ? "Promise<" + stringifyDefinitionOf($returnSchema) + ">" : stringifyDefinitionOf($returnSchema)}`;
       return res;
     },
   } satisfies Sig<any>;
@@ -308,6 +309,159 @@ export interface Safunc<F extends Fn> extends F {
    */
   allowArguments: (...args: unknown[]) => boolean;
 }
+
+const _defBuilder =
+  ({ async }: { async: boolean }) =>
+  (...args: unknown[]) => {
+    const sigs = args.slice(0, -1) as Sig<any>[];
+    const fn = args[args.length - 1] as Fn;
+
+    let $matchedMorphedArguments: unknown[] = [];
+    const matchArguments = (...args: unknown[]): Sig<any> => {
+      const availableArgumentLengths = [
+        ...new Set([...sigs.flatMap((sig) => sig.$availableArgumentLengths)]),
+      ].sort();
+      if (!availableArgumentLengths.includes(args.length)) {
+        const message = `Expected ${humanizeNaturalNumbers(availableArgumentLengths)} arguments, but got ${args.length}`;
+        throw new TypeError(message);
+      }
+
+      const sigAndMessages: [Sig<any>, string][] = [];
+      for (let overloadIdx = 0; overloadIdx < sigs.length; overloadIdx++) {
+        const sig = sigs[overloadIdx]!;
+        const { $availableArgumentLengths, $parameterSchemas } = sig;
+        if (!$availableArgumentLengths.includes(args.length)) {
+          sigAndMessages.push([sig, "ARG_LENGTH_NOT_MATCH"]);
+          continue;
+        }
+        const morphedArgs: unknown[] = [];
+        for (let i = 0; i < args.length; i++) {
+          let validator = $parameterSchemas[i];
+          if (!validator) continue;
+          if (isOptional(validator)) validator = validator[optionalSymbol];
+          const { data, problems } = validator(args[i]);
+          if (!problems) {
+            morphedArgs.push(data);
+            continue;
+          }
+          const problem = problems[0]!;
+          const reason = problem.reason;
+          let message = "";
+          // If the message is not just the reason
+          if (problem.message.length !== reason.length) {
+            let prefix = problem.message.toLowerCase().slice(0, -reason.length).trim();
+            // If it is likely a property name (contains no space and is not a number)
+            if (!prefix.includes(" ") && isNaN(Number(prefix))) prefix = `Property '${prefix}'`;
+            message += prefix + " of ";
+          }
+          message += `the ${ordinal(i + 1)} argument of 'function`;
+          // If function has a name
+          if (fn.name) message += ` ${fn.name}`;
+          message += sig.toString({ wrapReturnTypeWithPromise: async }) + "' ";
+          if (sigs.length > 1) message += `(overload ${overloadIdx + 1} of ${sigs.length}) `;
+          message += reason;
+          message = capitalize(message);
+          sigAndMessages.push([sig, message]);
+          break;
+        }
+        if (!sigAndMessages[overloadIdx]) {
+          $matchedMorphedArguments = morphedArgs;
+          return sig;
+        }
+      }
+
+      const errors = sigAndMessages
+        .map(([sig, message], i) => ({ i, sig, message }))
+        .filter(({ message: m }) => m !== "ARG_LENGTH_NOT_MATCH");
+
+      if (errors.length === 1) throw new TypeError(errors[0]!.message);
+
+      let message = "No overload ";
+      if (fn.name) message += `of function '${fn.name}' `;
+      message += "matches this call.\n";
+      for (const { i, message: m, sig } of errors) {
+        message += `  Overload ${i + 1} of ${sigs.length}, '${sig.toString({ wrapReturnTypeWithPromise: async })}', gave the following error.\n`;
+        message +=
+          "    " +
+          m.replace(/argument of 'function.+?'( \(overload \d+ of \d+\))?/g, "argument") +
+          "\n";
+      }
+      message = message.trimEnd();
+      throw new TypeError(message);
+    };
+
+    const assertReturn = (sig: Sig<any>, r: unknown) => {
+      const { data, problems } = sig.$returnSchema(r);
+      if (!problems) return data;
+      const problem = problems[0]!;
+      const reason = problem.reason;
+      let message = "";
+      // If the message is not just the reason
+      if (problem.message.length !== reason.length) {
+        let prefix = problem.message.toLowerCase().slice(0, -reason.length).trim();
+        // If it is likely a property name (contains no space and is not a number)
+        if (!prefix.includes(" ") && isNaN(Number(prefix))) prefix = `Property '${prefix}'`;
+        message += prefix + " of ";
+      }
+      message += "the return value of 'function";
+      // If function has a name
+      if (fn.name) message += ` ${fn.name}`;
+      message += sig.toString({ wrapReturnTypeWithPromise: async }) + "' ";
+      if (sigs.length > 1) message += `(overload ${sigs.indexOf(sig) + 1} of ${sigs.length}) `;
+      message += reason;
+      message = capitalize(message);
+      throw new TypeError(message);
+    };
+
+    const f = (...args: never[]) => {
+      const matchedSig = matchArguments(...args);
+      if (!async) return assertReturn(matchedSig, fn(...($matchedMorphedArguments as never[])));
+      return new Promise((resolve, reject) => {
+        void (fn(...($matchedMorphedArguments as never[])) as Promise<unknown>).then((res) => {
+          try {
+            resolve(assertReturn(matchedSig, res));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    };
+
+    // Keep the name of the function for better error messages
+    Object.defineProperty(f, "name", { value: fn.name });
+
+    const res = f.bind(null);
+    Object.defineProperty(res, "name", { value: fn.name });
+
+    Object.assign(res, {
+      $sigs: sigs,
+      $fn: fn,
+
+      unwrap: () => f,
+
+      matchArguments: (...args: unknown[]) => {
+        try {
+          return matchArguments(...args);
+        } catch (e) {
+          return null;
+        }
+      },
+      assertArguments: (...args: unknown[]) => {
+        matchArguments(...args);
+      },
+
+      allowArguments: (...args: unknown[]) => {
+        try {
+          matchArguments(...args);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    } satisfies Safunc<any>);
+
+    return res;
+  };
 
 /**
  * Create a type-safe function with runtime parameters and (optionally) return type validation.
@@ -383,144 +537,37 @@ export const def: {
   <FIn1 extends Fn, FOut1 extends Fn, FIn2 extends Fn, FOut2 extends Fn, FIn3 extends Fn, FOut3 extends Fn, FIn4 extends Fn, FOut4 extends Fn, FIn5 extends Fn, FOut5 extends Fn, FIn6 extends Fn, FOut6 extends Fn, FIn7 extends Fn, FOut7 extends Fn, F extends (...args: Parameters<FIn1> | Parameters<FIn2> | Parameters<FIn3> | Parameters<FIn4> | Parameters<FIn5> | Parameters<FIn6> | Parameters<FIn7>) => FInReturn<[FIn1, FIn2, FIn3, FIn4, FIn5, FIn6, FIn7]>>(sig1: SigInOut<FIn1, FOut1>, sig2: SigInOut<FIn2, FOut2>, sig3: SigInOut<FIn3, FOut3>, sig4: SigInOut<FIn4, FOut4>, sig5: SigInOut<FIn5, FOut5>, sig6: SigInOut<FIn6, FOut6>, sig7: SigInOut<FIn7, FOut7>, fn: F): Safunc<RefineUntyped<FOut1, ReturnType<F>> & RefineUntyped<FOut2, ReturnType<F>> & RefineUntyped<FOut3, ReturnType<F>> & RefineUntyped<FOut4, ReturnType<F>> & RefineUntyped<FOut5, ReturnType<F>> & RefineUntyped<FOut6, ReturnType<F>> & RefineUntyped<FOut7, ReturnType<F>>>;
   // prettier-ignore
   <FIn1 extends Fn, FOut1 extends Fn, FIn2 extends Fn, FOut2 extends Fn, FIn3 extends Fn, FOut3 extends Fn, FIn4 extends Fn, FOut4 extends Fn, FIn5 extends Fn, FOut5 extends Fn, FIn6 extends Fn, FOut6 extends Fn, FIn7 extends Fn, FOut7 extends Fn, FIn8 extends Fn, FOut8 extends Fn, F extends (...args: Parameters<FIn1> | Parameters<FIn2> | Parameters<FIn3> | Parameters<FIn4> | Parameters<FIn5> | Parameters<FIn6> | Parameters<FIn7> | Parameters<FIn8>) => FInReturn<[FIn1, FIn2, FIn3, FIn4, FIn5, FIn6, FIn7, FIn8]>>(sig1: SigInOut<FIn1, FOut1>, sig2: SigInOut<FIn2, FOut2>, sig3: SigInOut<FIn3, FOut3>, sig4: SigInOut<FIn4, FOut4>, sig5: SigInOut<FIn5, FOut5>, sig6: SigInOut<FIn6, FOut6>, sig7: SigInOut<FIn7, FOut7>, sig8: SigInOut<FIn8, FOut8>, fn: F): Safunc<RefineUntyped<FOut1, ReturnType<F>> & RefineUntyped<FOut2, ReturnType<F>> & RefineUntyped<FOut3, ReturnType<F>> & RefineUntyped<FOut4, ReturnType<F>> & RefineUntyped<FOut5, ReturnType<F>> & RefineUntyped<FOut6, ReturnType<F>> & RefineUntyped<FOut7, ReturnType<F>> & RefineUntyped<FOut8, ReturnType<F>>>;
-} = ((...args: unknown[]) => {
-  const sigs = args.slice(0, -1) as Sig<any>[];
-  const fn = args[args.length - 1] as Fn;
+} = _defBuilder({ async: false }) as never;
 
-  let $matchedMorphedArguments: unknown[] = [];
-  const matchArguments = (...args: unknown[]): Sig<any> => {
-    const availableArgumentLengths = [
-      ...new Set([...sigs.flatMap((sig) => sig.$availableArgumentLengths)]),
-    ].sort();
-    if (!availableArgumentLengths.includes(args.length)) {
-      const message = `Expected ${humanizeNaturalNumbers(availableArgumentLengths)} arguments, but got ${args.length}`;
-      throw new TypeError(message);
-    }
+type Asyncify<F extends Fn> =
+  F extends infer F extends Fn ? (...args: Parameters<F>) => Promise<ReturnType<F>> : never;
 
-    const sigAndMessages: [Sig<any>, string][] = [];
-    for (let overloadIdx = 0; overloadIdx < sigs.length; overloadIdx++) {
-      const sig = sigs[overloadIdx]!;
-      const { $availableArgumentLengths, $parameterSchemas } = sig;
-      if (!$availableArgumentLengths.includes(args.length)) {
-        sigAndMessages.push([sig, "ARG_LENGTH_NOT_MATCH"]);
-        continue;
-      }
-      const morphedArgs: unknown[] = [];
-      for (let i = 0; i < args.length; i++) {
-        let validator = $parameterSchemas[i];
-        if (!validator) continue;
-        if (isOptional(validator)) validator = validator[optionalSymbol];
-        const { data, problems } = validator(args[i]);
-        if (!problems) {
-          morphedArgs.push(data);
-          continue;
-        }
-        const problem = problems[0]!;
-        const reason = problem.reason;
-        let message = "";
-        // If the message is not just the reason
-        if (problem.message.length !== reason.length) {
-          let prefix = problem.message.toLowerCase().slice(0, -reason.length).trim();
-          // If it is likely a property name (contains no space and is not a number)
-          if (!prefix.includes(" ") && isNaN(Number(prefix))) prefix = `Property '${prefix}'`;
-          message += prefix + " of ";
-        }
-        message += `the ${ordinal(i + 1)} argument of 'function`;
-        // If function has a name
-        if (fn.name) message += ` ${fn.name}`;
-        message += sig.toString() + "' ";
-        if (sigs.length > 1) message += `(overload ${overloadIdx + 1} of ${sigs.length}) `;
-        message += reason;
-        message = capitalize(message);
-        sigAndMessages.push([sig, message]);
-        break;
-      }
-      if (!sigAndMessages[overloadIdx]) {
-        $matchedMorphedArguments = morphedArgs;
-        return sig;
-      }
-    }
-
-    const errors = sigAndMessages
-      .map(([sig, message], i) => ({ i, sig, message }))
-      .filter(({ message: m }) => m !== "ARG_LENGTH_NOT_MATCH");
-
-    if (errors.length === 1) throw new TypeError(errors[0]!.message);
-
-    let message = "No overload ";
-    if (fn.name) message += `of function '${fn.name}' `;
-    message += "matches this call.\n";
-    for (const { i, message: m, sig } of errors) {
-      message += `  Overload ${i + 1} of ${sigs.length}, '${sig.toString()}', gave the following error.\n`;
-      message +=
-        "    " +
-        m.replace(/argument of 'function.+?'( \(overload \d+ of \d+\))?/g, "argument") +
-        "\n";
-    }
-    message = message.trimEnd();
-    throw new TypeError(message);
-  };
-
-  const assertReturn = (sig: Sig<any>, r: unknown) => {
-    const { data, problems } = sig.$returnSchema(r);
-    if (!problems) return data;
-    const problem = problems[0]!;
-    const reason = problem.reason;
-    let message = "";
-    // If the message is not just the reason
-    if (problem.message.length !== reason.length) {
-      let prefix = problem.message.toLowerCase().slice(0, -reason.length).trim();
-      // If it is likely a property name (contains no space and is not a number)
-      if (!prefix.includes(" ") && isNaN(Number(prefix))) prefix = `Property '${prefix}'`;
-      message += prefix + " of ";
-    }
-    message += "the return value of 'function";
-    // If function has a name
-    if (fn.name) message += ` ${fn.name}`;
-    message += sig.toString() + "' ";
-    if (sigs.length > 1) message += `(overload ${sigs.indexOf(sig) + 1} of ${sigs.length}) `;
-    message += reason;
-    message = capitalize(message);
-    throw new TypeError(message);
-  };
-
-  const f = (...args: never[]) => {
-    const matchedSig = matchArguments(...args);
-    return assertReturn(matchedSig, fn(...($matchedMorphedArguments as never[])));
-  };
-
-  // Keep the name of the function for better error messages
-  Object.defineProperty(f, "name", { value: fn.name });
-
-  const res = f.bind(null);
-  Object.defineProperty(res, "name", { value: fn.name });
-
-  Object.assign(res, {
-    $sigs: sigs,
-    $fn: fn,
-
-    unwrap: () => f,
-
-    matchArguments: (...args: unknown[]) => {
-      try {
-        return matchArguments(...args);
-      } catch (e) {
-        return null;
-      }
-    },
-    assertArguments: (...args: unknown[]) => {
-      matchArguments(...args);
-    },
-
-    allowArguments: (...args: unknown[]) => {
-      try {
-        matchArguments(...args);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-  } satisfies Safunc<any>);
-
-  return res;
-}) as never;
+/**
+ * Create a type-safe asynchronous function with runtime parameters and (optionally) return type validation.
+ *
+ * Same as {@link def}, but the return type of the function must be a `Promise`.
+ */
+export const defAsync: {
+  <FIn extends Fn, FOut extends Fn, F extends Asyncify<RefineUntyped<FIn, any>>>(
+    sig: SigInOut<FIn, FOut>,
+    fn: F,
+  ): Safunc<
+    (
+      ...args: LabeledBy<Parameters<F>, Parameters<FOut>>
+    ) => Promise<IfUntyped<ReturnType<FOut>, ReturnType<F>>>
+  >;
+  // prettier-ignore
+  <FIn1 extends Fn, FOut1 extends Fn, FIn2 extends Fn, FOut2 extends Fn, F extends (...args: Parameters<FIn1> | Parameters<FIn2>) => Promise<FInReturn<[FIn1, FIn2]>>>(sig1: SigInOut<FIn1, FOut1>, sig2: SigInOut<FIn2, FOut2>, fn: F): Safunc<Asyncify<RefineUntyped<FOut1, ReturnType<F>>> & Asyncify<RefineUntyped<FOut2, ReturnType<F>>>>;
+  // prettier-ignore
+  <FIn1 extends Fn, FOut1 extends Fn, FIn2 extends Fn, FOut2 extends Fn, FIn3 extends Fn, FOut3 extends Fn, F extends (...args: Parameters<FIn1> | Parameters<FIn2> | Parameters<FIn3>) => Promise<FInReturn<[FIn1, FIn2, FIn3]>>>(sig1: SigInOut<FIn1, FOut1>, sig2: SigInOut<FIn2, FOut2>, sig3: SigInOut<FIn3, FOut3>, fn: F): Safunc<Asyncify<RefineUntyped<FOut1, ReturnType<F>>> & Asyncify<RefineUntyped<FOut2, ReturnType<F>>> & Asyncify<RefineUntyped<FOut3, ReturnType<F>>>>;
+  // prettier-ignore
+  <FIn1 extends Fn, FOut1 extends Fn, FIn2 extends Fn, FOut2 extends Fn, FIn3 extends Fn, FOut3 extends Fn, FIn4 extends Fn, FOut4 extends Fn, F extends (...args: Parameters<FIn1> | Parameters<FIn2> | Parameters<FIn3> | Parameters<FIn4>) => Promise<FInReturn<[FIn1, FIn2, FIn3, FIn4]>>>(sig1: SigInOut<FIn1, FOut1>, sig2: SigInOut<FIn2, FOut2>, sig3: SigInOut<FIn3, FOut3>, sig4: SigInOut<FIn4, FOut4>, fn: F): Safunc<Asyncify<RefineUntyped<FOut1, ReturnType<F>>> & Asyncify<RefineUntyped<FOut2, ReturnType<F>>> & Asyncify<RefineUntyped<FOut3, ReturnType<F>>> & Asyncify<RefineUntyped<FOut4, ReturnType<F>>>>;
+  // prettier-ignore
+  <FIn1 extends Fn, FOut1 extends Fn, FIn2 extends Fn, FOut2 extends Fn, FIn3 extends Fn, FOut3 extends Fn, FIn4 extends Fn, FOut4 extends Fn, FIn5 extends Fn, FOut5 extends Fn, F extends (...args: Parameters<FIn1> | Parameters<FIn2> | Parameters<FIn3> | Parameters<FIn4> | Parameters<FIn5>) => Promise<FInReturn<[FIn1, FIn2, FIn3, FIn4, FIn5]>>>(sig1: SigInOut<FIn1, FOut1>, sig2: SigInOut<FIn2, FOut2>, sig3: SigInOut<FIn3, FOut3>, sig4: SigInOut<FIn4, FOut4>, sig5: SigInOut<FIn5, FOut5>, fn: F): Safunc<Asyncify<RefineUntyped<FOut1, ReturnType<F>>> & Asyncify<RefineUntyped<FOut2, ReturnType<F>>> & Asyncify<RefineUntyped<FOut3, ReturnType<F>>> & Asyncify<RefineUntyped<FOut4, ReturnType<F>>> & Asyncify<RefineUntyped<FOut5, ReturnType<F>>>>;
+  // prettier-ignore
+  <FIn1 extends Fn, FOut1 extends Fn, FIn2 extends Fn, FOut2 extends Fn, FIn3 extends Fn, FOut3 extends Fn, FIn4 extends Fn, FOut4 extends Fn, FIn5 extends Fn, FOut5 extends Fn, FIn6 extends Fn, FOut6 extends Fn, F extends (...args: Parameters<FIn1> | Parameters<FIn2> | Parameters<FIn3> | Parameters<FIn4> | Parameters<FIn5> | Parameters<FIn6>) => Promise<FInReturn<[FIn1, FIn2, FIn3, FIn4, FIn5, FIn6]>>>(sig1: SigInOut<FIn1, FOut1>, sig2: SigInOut<FIn2, FOut2>, sig3: SigInOut<FIn3, FOut3>, sig4: SigInOut<FIn4, FOut4>, sig5: SigInOut<FIn5, FOut5>, sig6: SigInOut<FIn6, FOut6>, fn: F): Safunc<Asyncify<RefineUntyped<FOut1, ReturnType<F>>> & Asyncify<RefineUntyped<FOut2, ReturnType<F>>> & Asyncify<RefineUntyped<FOut3, ReturnType<F>>> & Asyncify<RefineUntyped<FOut4, ReturnType<F>>> & Asyncify<RefineUntyped<FOut5, ReturnType<F>>> & Asyncify<RefineUntyped<FOut6, ReturnType<F>>>>;
+  // prettier-ignore
+  <FIn1 extends Fn, FOut1 extends Fn, FIn2 extends Fn, FOut2 extends Fn, FIn3 extends Fn, FOut3 extends Fn, FIn4 extends Fn, FOut4 extends Fn, FIn5 extends Fn, FOut5 extends Fn, FIn6 extends Fn, FOut6 extends Fn, FIn7 extends Fn, FOut7 extends Fn, F extends (...args: Parameters<FIn1> | Parameters<FIn2> | Parameters<FIn3> | Parameters<FIn4> | Parameters<FIn5> | Parameters<FIn6> | Parameters<FIn7>) => Promise<FInReturn<[FIn1, FIn2, FIn3, FIn4, FIn5, FIn6, FIn7]>>>(sig1: SigInOut<FIn1, FOut1>, sig2: SigInOut<FIn2, FOut2>, sig3: SigInOut<FIn3, FOut3>, sig4: SigInOut<FIn4, FOut4>, sig5: SigInOut<FIn5, FOut5>, sig6: SigInOut<FIn6, FOut6>, sig7: SigInOut<FIn7, FOut7>, fn: F): Safunc<Asyncify<RefineUntyped<FOut1, ReturnType<F>>> & Asyncify<RefineUntyped<FOut2, ReturnType<F>>> & Asyncify<RefineUntyped<FOut3, ReturnType<F>>> & Asyncify<RefineUntyped<FOut4, ReturnType<F>>> & Asyncify<RefineUntyped<FOut5, ReturnType<F>>> & Asyncify<RefineUntyped<FOut6, ReturnType<F>>> & Asyncify<RefineUntyped<FOut7, ReturnType<F>>>>;
+  // prettier-ignore
+  <FIn1 extends Fn, FOut1 extends Fn, FIn2 extends Fn, FOut2 extends Fn, FIn3 extends Fn, FOut3 extends Fn, FIn4 extends Fn, FOut4 extends Fn, FIn5 extends Fn, FOut5 extends Fn, FIn6 extends Fn, FOut6 extends Fn, FIn7 extends Fn, FOut7 extends Fn, FIn8 extends Fn, FOut8 extends Fn, F extends (...args: Parameters<FIn1> | Parameters<FIn2> | Parameters<FIn3> | Parameters<FIn4> | Parameters<FIn5> | Parameters<FIn6> | Parameters<FIn7> | Parameters<FIn8>) => Promise<FInReturn<[FIn1, FIn2, FIn3, FIn4, FIn5, FIn6, FIn7, FIn8]>>>(sig1: SigInOut<FIn1, FOut1>, sig2: SigInOut<FIn2, FOut2>, sig3: SigInOut<FIn3, FOut3>, sig4: SigInOut<FIn4, FOut4>, sig5: SigInOut<FIn5, FOut5>, sig6: SigInOut<FIn6, FOut6>, sig7: SigInOut<FIn7, FOut7>, sig8: SigInOut<FIn8, FOut8>, fn: F): Safunc<Asyncify<RefineUntyped<FOut1, ReturnType<F>>> & Asyncify<RefineUntyped<FOut2, ReturnType<F>>> & Asyncify<RefineUntyped<FOut3, ReturnType<F>>> & Asyncify<RefineUntyped<FOut4, ReturnType<F>>> & Asyncify<RefineUntyped<FOut5, ReturnType<F>>> & Asyncify<RefineUntyped<FOut6, ReturnType<F>>> & Asyncify<RefineUntyped<FOut7, ReturnType<F>>> & Asyncify<RefineUntyped<FOut8, ReturnType<F>>>>;
+} = _defBuilder({ async: true }) as never;

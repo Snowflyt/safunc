@@ -1,7 +1,7 @@
 <h1 align="center">Safunc</h1>
 
 <p align="center">
-Create <strong><i>runtime-validated</i> functions</strong> with ease, featuring <strong>smart type inference</strong> in TypeScript.
+Create <strong><i>runtime-validated</i> functions</strong> for both <strong>synchronous</strong> and <strong>asynchronous</strong> ones with ease, featuring <strong>smart type inference</strong> in TypeScript.
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@ Have a try on [StackBlitz](https://stackblitz.com/edit/safunc-minimal-example?fi
 
 ## About
 
-Safunc is a small utility library that allows you to create functions with **runtime validation** of arguments and (optionally) return values, supporting **optional parameters** and **overloaded signatures** with **smart type inference** in TypeScript. It is powered by [Arktype](https://github.com/arktypeio/arktype), an amazing runtime type-checking library using almost 1:1 syntax with TypeScript.
+Safunc is a small utility library that allows you to create both **synchronous** and **asynchronous** functions with **runtime validation** of arguments and (optionally) return values, supporting **optional parameters** and **overloaded signatures** with **smart type inference** in TypeScript. It is powered by [Arktype](https://github.com/arktypeio/arktype), an amazing runtime type-checking library using almost 1:1 syntax with TypeScript.
 
 ![demo](./demo.gif)
 
@@ -91,6 +91,58 @@ addIntegers(1, 2); // !TypeError: The return value of 'function add(integer, int
 //                                                              ^^^
 //                                       Name of the function is used in the error message
 ```
+
+### Asynchronous Functions
+
+When working with asynchronous functions, such as those commonly found in REST API calls, it is likely you want to validate the arguments and return types if the API is unreliable or the data is critical. Safunc facilitates this with the `defAsync` function, which is used in place of `def`:
+
+```typescript
+import { arrayOf, type } from "arktype";
+import { defAsync, sig } from "safunc";
+
+type Todo = typeof todo.infer;
+const todo = type({
+  userId: "integer>0",
+  id: "integer>0",
+  title: "string",
+  completed: "boolean",
+});
+
+const getTodos = defAsync(sig("=>", arrayOf(todo)), async () => {
+  //  ^?: Safunc<() => Promise<Todo[]>>
+  const res = await fetch("https://jsonplaceholder.typicode.com/todos");
+  return res.json() as Promise<Todo[]>;
+});
+await getTodos(); // => [{ userId: 1, id: 1, title: "delectus aut autem", completed: false }, ...]
+
+type TodoWrong = typeof todoWrong.infer;
+const todoWrong = type({
+  userId: "integer>0",
+  id: "string>0", // <- This will throw a TypeError
+  title: "string",
+  completed: "boolean",
+});
+
+const getTodosWrong = defAsync(sig("=>", arrayOf(todoWrong)), async () => {
+  //  ^?: Safunc<() => Promise<TodoWrong[]>>
+  const res = await fetch("https://jsonplaceholder.typicode.com/todos");
+  return res.json() as Promise<TodoWrong[]>;
+});
+await getTodosWrong(); // !TypeError: Property '0/id' of the return value of 'function(): Promise<Array<{ userId: integer>0; id: string>0; title: string; completed: boolean }>>' must be a string (was number)
+
+const getTodo = defAsync(
+  //  ^?: Safunc<(id: number) => Promise<Todo>>
+  sig("integer>0", "=>", todo),
+  async (id) =>
+    await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`).then(
+      (res) => res.json() as Promise<Todo>,
+    ),
+);
+getTodo(0.5); // !TypeError: The 1st argument of 'function(integer>0): Promise<{ userId: integer>0; id: integer>0; title: string; completed: boolean }>' must be an integer (was 0.5)
+await getTodo(1); // => { userId: 1, id: 1, title: "delectus aut autem", completed: false }
+```
+
+`defAsync` supports all features of `def`, including optional parameters and overloaded signatures, which will be discussed later. The only difference is that `defAsync` requires functions to return a `Promise`, and validation of the return value is handled asynchronously (while the arguments are still validated synchronously).
 
 ### Optional Parameters
 
