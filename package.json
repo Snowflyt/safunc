@@ -1,6 +1,6 @@
 {
   "name": "safunc",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Create runtime-validated functions for both synchronous and asynchronous ones with ease, supporting optional parameters and overloaded signatures with smart type inference in TypeScript",
   "keywords": [

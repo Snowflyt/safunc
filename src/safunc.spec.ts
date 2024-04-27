@@ -358,6 +358,34 @@ it("should support asynchronous functions", async () => {
     ),
   );
 
+  let errorMessage = "";
+  const getTodosWrong2 = getTodosWrong.onValidationError((e) => {
+    errorMessage = e.message;
+  });
+  expect((await getTodosWrong2()).slice(0, 3)).toEqual([
+    {
+      userId: 1,
+      id: 1,
+      title: "delectus aut autem",
+      completed: false,
+    },
+    {
+      userId: 1,
+      id: 2,
+      title: "quis ut nam facilis et officia qui",
+      completed: false,
+    },
+    {
+      userId: 1,
+      id: 3,
+      title: "fugiat veniam minus",
+      completed: false,
+    },
+  ]);
+  expect(errorMessage).toBe(
+    "Property '0/id' of the return value of 'function(): Promise<Array<{ userId: integer>0; id: string>0; title: string; completed: boolean }>>' must be a string (was number)",
+  );
+
   const getTodo = defAsync(
     //  ^?
     sig("integer>0", "=>", todo),

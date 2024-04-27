@@ -346,6 +346,12 @@ const range = def(sig1, sig2, (startOrStop, stop?, step = 1) => {
 const unwrappedRange = range.unwrap();
 //    ^?: ((stop: number) => number[]) & ((start: number, stop: number, step?: number) => number[])
 
+// Use `onValidationError` to provide alternative error handling instead of just throwing a `TypeError`
+const range2 = range.onValidationError(console.error);
+range2(1, 3.5); // => [1, 2, 3] - The function is returned as the errors are handled by a custom handler
+// This time, the error message is printed to the console and no error is thrown
+// If you still want to throw an error instead of returning the function, you can rethrow it in the custom handler
+
 // Use `Safunc#matchArguments` to get the matched `Sig` for the given arguments
 range.matchArguments(3); // => sig1
 range.matchArguments(1, 5); // => sig2

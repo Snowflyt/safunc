@@ -274,6 +274,15 @@ test("helper methods", () => {
     return Array.from({ length: Math.ceil((stop - start) / step) }, (_, i) => start + i * step);
   });
 
+  let errorMessage = "";
+  const range2 = range.onValidationError((e) => {
+    errorMessage = e.message;
+  });
+  expect(range2(1, 3.5)).toEqual([1, 2, 3]);
+  expect(errorMessage).toBe(
+    "The 2nd argument of 'function(integer, integer, ?integer>0): Array<integer>' (overload 2 of 2) must be an integer (was 3.5)",
+  );
+
   expect(range.matchArguments(3)).toBe(sig1);
   expect(range.matchArguments(1, 5)).toBe(sig2);
   expect(range.matchArguments("foo")).toBe(null);

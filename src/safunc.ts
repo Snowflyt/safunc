@@ -289,6 +289,13 @@ export interface Safunc<F extends Fn> extends F {
   unwrap: () => F;
 
   /**
+   * Provides an error handler for validation errors instead of throwing them.
+   * @param handler The error handler.
+   * @returns
+   */
+  onValidationError: (handler: (e: TypeError) => void) => Safunc<F>;
+
+  /**
    * Get the matched `Sig` for given arguments.
    * @param args Arguments to match.
    * @returns
@@ -311,7 +318,13 @@ export interface Safunc<F extends Fn> extends F {
 }
 
 const _defBuilder =
-  ({ async }: { async: boolean }) =>
+  ({
+    async,
+    validationErrorHandler,
+  }: {
+    async: boolean;
+    validationErrorHandler?: (e: TypeError) => void;
+  }) =>
   (...args: unknown[]) => {
     const sigs = args.slice(0, -1) as Sig<any>[];
     const fn = args[args.length - 1] as Fn;
@@ -323,6 +336,11 @@ const _defBuilder =
       ].sort();
       if (!availableArgumentLengths.includes(args.length)) {
         const message = `Expected ${humanizeNaturalNumbers(availableArgumentLengths)} arguments, but got ${args.length}`;
+        if (validationErrorHandler) {
+          validationErrorHandler(new TypeError(message));
+          $matchedMorphedArguments = args;
+          return sigs[0]!;
+        }
         throw new TypeError(message);
       }
 
@@ -374,7 +392,14 @@ const _defBuilder =
         .map(([sig, message], i) => ({ i, sig, message }))
         .filter(({ message: m }) => m !== "ARG_LENGTH_NOT_MATCH");
 
-      if (errors.length === 1) throw new TypeError(errors[0]!.message);
+      if (errors.length === 1) {
+        if (validationErrorHandler) {
+          validationErrorHandler(new TypeError(errors[0]!.message));
+          $matchedMorphedArguments = args;
+          return errors[0]!.sig;
+        }
+        throw new TypeError(errors[0]!.message);
+      }
 
       let message = "No overload ";
       if (fn.name) message += `of function '${fn.name}' `;
@@ -387,6 +412,11 @@ const _defBuilder =
           "\n";
       }
       message = message.trimEnd();
+      if (validationErrorHandler) {
+        validationErrorHandler(new TypeError(message));
+        $matchedMorphedArguments = args;
+        return errors[0]!.sig;
+      }
       throw new TypeError(message);
     };
 
@@ -410,6 +440,10 @@ const _defBuilder =
       if (sigs.length > 1) message += `(overload ${sigs.indexOf(sig) + 1} of ${sigs.length}) `;
       message += reason;
       message = capitalize(message);
+      if (validationErrorHandler) {
+        validationErrorHandler(new TypeError(message));
+        return r;
+      }
       throw new TypeError(message);
     };
 
@@ -438,6 +472,9 @@ const _defBuilder =
       $fn: fn,
 
       unwrap: () => f,
+
+      onValidationError: (handler: (e: TypeError) => void) =>
+        _defBuilder({ async, validationErrorHandler: handler })(...args) as unknown as Safunc<any>,
 
       matchArguments: (...args: unknown[]) => {
         try {
